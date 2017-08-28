@@ -23,20 +23,21 @@ char daysOfTheWeek[7][12] = {
   "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 };
 
-int lastHour;
 int lastMinute;
 
 void setup () {
   while (!Serial); // for Leonardo/Micro/Zero
 
   Serial.begin(57600);
-  
+
   if (! rtc.begin()) {
     Serial.println("Couldn't find RTC");
     while (1);
   }
-  
+
   Serial.println(rtc.isrunning());
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
 
   if (! rtc.isrunning()) {
     Serial.println("RTC is NOT running!");
@@ -45,34 +46,40 @@ void setup () {
     // This line sets the RTC with an explicit date & time, for example to set
     // January 21, 2014 at 3am you would call:
     // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+    digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+    delay(1000);                       // wait for a second
+    digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+    delay(1000);
   }
 
   DateTime now = rtc.now();
-
-  lastHour = now.hour();
   lastMinute = now.minute();
 
   mcp.begin();      // use default address 0
 
-  for (int i=0; i < 12; i++){
-      mcp.pinMode(i, OUTPUT);
-      mcp.digitalWrite(i, LOW);
+  for (int i = 0; i < 12; i++) {
+    mcp.pinMode(i, OUTPUT);
+    mcp.digitalWrite(i, LOW);
   }
   
- // mcp.digitalWrite(11, HIGH);
-  
-  
   printTime();
+}
+
+boolean shouldIndicateHour(int currentMinute) {
+  if (currentMinute % 15 == 0) {
+    return true;
+  }
+  return false;
 }
 
 int convertHourToPin(int currentHour) {
   int pin;
   if (currentHour == 24) {
     pin = 0;
-  } 
+  }
   else if (currentHour < 12) {
     pin = currentHour - 1;
-  } 
+  }
   else {
     pin = currentHour - 12;
   }
@@ -83,12 +90,16 @@ int convertMinuteOrSecondToPin(int currentMinute) {
   int pin = (currentMinute / 5);
   if (pin == 12) {  // make sure it won't try to vibrate motor number -1
     pin = 0;
-    
-  } 
+  }
   else if (pin > 12) {
     pin -=  11;
   }
   return pin;
+}
+
+int getVibrationCount(int currentMinute) {
+  int vibCount = (currentMinute % 5);
+  return vibCount + 1;
 }
 
 int convertCurrentPinToPrevious(int pin) {
@@ -108,9 +119,9 @@ void stopMotorVibration(int pin) {
   mcp.digitalWrite(pin, LOW);  // maybe more actions will be performed later
 }
 
-void cycleMotorVibration(int pin, int duration) {  // duration in seconds
+void cycleMotorVibration(int pin, int duration) {  // duration in milliseconds
   startMotorVibration(pin);
-  delay(duration * 1000);
+  delay(duration);
   stopMotorVibration(pin);
 }
 
@@ -133,30 +144,36 @@ void printTime() {
 }
 
 void cycleSeconds(int pin) {
-  Serial.println(pin);
   startMotorVibration(pin);  // continuously vibrate seconds motors for testing purposes
-  int previousPin = convertCurrentPinToPrevious(pin);
-  Serial.println(previousPin);
-  stopMotorVibration(previousPin);
+  int previousPin = convertCurrentPinToPrevious(pin); // gets pin for previous second
+  stopMotorVibration(previousPin); // stops vibration of previous vibrating pin
 }
 
+
 void checkTime () {
-  int pin;
   DateTime now = rtc.now();
-  if (lastHour != now.hour()) {  // if the hour has changed, vibrate corresponding motor for 3 seconds
-    int currentHour = now.hour();
-    lastHour = currentHour; // overwrite lastHour so this won't trigger on next loop
-    pin = convertHourToPin(currentHour);
-    //cycleMotorVibration(pin, 3);
-  }
-  if (lastMinute != now.minute()) {  // if the minute has changed, vibrate corresponding motor for 2 seconds
+  if (lastMinute != now.minute()) {  // if the minute has changed, vibrate corresponding motor
     int currentMinute = now.minute();
     lastMinute = currentMinute;  // overwrite lastMinute so this won't trigger on next loop
-    pin = convertMinuteOrSecondToPin(currentMinute);
-   // cycleMotorVibration(pin, 2);
+    if (shouldIndicateHour(currentMinute)) {
+      int currentHour = now.hour();
+      int hourPin = convertHourToPin(currentHour);
+      cycleMotorVibration(hourPin, 3000);
+    } else {
+      int minutePin = convertMinuteOrSecondToPin(currentMinute);
+      int vibrationCount = getVibrationCount(currentMinute);
+      for (int i = 0; i < vibrationCount; i++) {
+        if (i == 0) {
+          cycleMotorVibration(minutePin, 1000);
+        } else {
+          delay(300);
+          cycleMotorVibration(minutePin, 500);
+        }
+      }
+    }
   }
-  pin = convertMinuteOrSecondToPin(now.second());
-  cycleSeconds(pin);
+  int secondPin = convertMinuteOrSecondToPin(now.second());
+  cycleSeconds(secondPin);
 }
 
 void loop () {
